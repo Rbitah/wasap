@@ -1,20 +1,18 @@
 import {
   Controller,
-  Get,
   Post,
   Body,
-  Query,
   Headers,
   HttpException,
   HttpStatus,
+  Get,
+  Query,
 } from '@nestjs/common';
 import { AppService } from './app.service';
 
 @Controller('webhook')
 export class AppController {
   constructor(private readonly appService: AppService) {}
-
-  // GET route for verification
   @Get()
   verifyToken(@Query('hub.mode') mode: string, @Query('hub.verify_token') token: string, @Query('hub.challenge') challenge: string) {
     const validToken = 'tiyenitickets'; // Replace with your token
@@ -26,12 +24,9 @@ export class AppController {
     }
   }
 
-  // POST route for handling webhook events
   @Post()
-  async handleWebhook(@Body() body: any, @Headers('X-Hub-Signature') hubSignature: string) {
-    if (!this.isXHubSignatureValid(hubSignature, body)) {
-      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
-    }
+  async handleWebhook(@Body() body: any) {
+   
 
     if (!body || !body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
       throw new HttpException('Invalid payload', HttpStatus.BAD_REQUEST);
@@ -60,16 +55,8 @@ export class AppController {
     return { status: 'ok' };
   }
 
-  // Helper function to validate X-Hub-Signature
-  private isXHubSignatureValid(hubSignature: string, body: any): boolean {
-    const secret = process.env.APP_SECRET || 'default_secret';
-    const crypto = require('crypto');
-    const hash = crypto
-      .createHmac('sha1', secret)
-      .update(JSON.stringify(body))
-      .digest('hex');
-    const expectedSignature = `sha1=${hash}`;
-
-    return hubSignature === expectedSignature;
+  private verifyTokenn(verify_token: string): boolean {
+    const validToken = 'tiyenitickets';
+    return verify_token === validToken;
   }
 }
