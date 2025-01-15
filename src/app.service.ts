@@ -15,83 +15,159 @@ export class AppService {
   constructor(private readonly httpService: HttpService) {}
 
   async handleMessage(from: string, messageText: string) {
+    console.log('Received message:', messageText);
+
     if (messageText.toLowerCase() === 'hi') {
       if (!this.users[from]) {
         this.users[from] = { step: 'ASK_USERNAME' };
-        return 'Hello! Please provide your username.';
+        return 'greeting_message';
       } else {
-        return 'Welcome back! Here are the available events:\n' + this.listEvents();
+        return {
+          template: 'event_list',
+          parameters: [{ type: 'text', text: this.listEvents() }],
+        };
       }
     }
 
-    if (this.users[from]?.step === 'ASK_USERNAME') {
-      this.users[from].username = messageText;
-      this.users[from].step = 'CHOOSE_EVENT';
-      return 'Thank you, ' + messageText + '! Here are the available events:\n' + this.listEvents();
+    const user = this.users[from];
+    if (user?.step === 'ASK_USERNAME') {
+      user.username = messageText;
+      user.step = 'CHOOSE_EVENT';
+      return {
+        template: 'thank_you_username',
+        parameters: [
+          { type: 'text', text: messageText },
+          { type: 'text', text: this.listEvents() },
+        ],
+      };
     }
 
-    if (this.users[from]?.step === 'CHOOSE_EVENT') {
+    if (user?.step === 'CHOOSE_EVENT') {
       const eventId = parseInt(messageText);
-      if (!this.events[eventId - 1]) {
-        return 'Invalid event number. Please try again.';
-      }
-      this.users[from].event = this.events[eventId - 1];
-      this.users[from].step = 'CHOOSE_PAYMENT';
-      return 'You selected ' + this.events[eventId - 1].name + '. Choose a payment method:\n1. Airtel Money\n2. Mpamba';
+      const event = this.events.find((e) => e.id === eventId);
+      if (!event) return 'invalid_event';
+
+      user.event = event;
+      user.step = 'CHOOSE_PAYMENT';
+      return 'choose_payment';
     }
 
-    if (this.users[from]?.step === 'CHOOSE_PAYMENT') {
-      if (messageText !== '1' && messageText !== '2') {
-        return 'Invalid choice. Please select 1 for Airtel Money or 2 for Mpamba.';
-      }
+    if (user?.step === 'CHOOSE_PAYMENT') {
+      if (messageText !== '1' && messageText !== '2') return 'invalid_payment_method';
+
       const paymentMethod = messageText === '1' ? 'Airtel Money' : 'Mpamba';
-      this.users[from].paymentMethod = paymentMethod;
-      this.users[from].step = 'PAYMENT';
-      // Implement payment processing here
-      // On success, proceed to generate a ticket
+      user.paymentMethod = paymentMethod;
+      user.step = 'PAYMENT';
+
       const ticketId = uuidv4();
-      const qrCode = await this.generateQRCode(ticketId);
-      return 'Payment successful! Here is your ticket QR code:\n' + qrCode;
+      const qrCodeUrl = await this.generateQRCode(ticketId);
+      const eventName = user.event.name;
+
+      return {
+        template: 'ticket_qr_code_images',
+        image: qrCodeUrl,
+        parameters: [
+          { type: 'text', text: user.username },
+          { type: 'text', text: eventName },
+        ],
+      };
     }
 
-    return 'Something went wrong. Please try again.';
+    return 'error_message';
   }
 
-  private listEvents() {
-    return this.events.map((e, index) => `${index + 1}. ${e.name}`).join('\n');
+  private listEvents(): string {
+    return this.events.map((e) => `${e.id}. ${e.name}`).join('\n');
   }
 
-  private async generateQRCode(ticketId: string) {
+  private async generateQRCode(ticketId: string): Promise<string> {
     try {
-      const qrCodeUrl = await QRCode.toDataURL(ticketId);
-      return qrCodeUrl;
+      const qrCodePath = `./qrcodes/${ticketId}.png`;
+      await QRCode.toFile(qrCodePath, ticketId);
+      return qrCodePath;
     } catch (err) {
-      console.error(err);
-      return 'Failed to generate QR code.';
+      console.error('QR Code generation failed:', err);
+      throw new Error('Failed to generate QR code.');
     }
   }
 
-  async sendWhatsAppMessage(to: string, message: string) {
-    const ACCESS_TOKEN = 'EAAIZCPFZAYWO8BO2wbZC2VYjHdrDTo8GcWWpanDTIbKljZB0y3akkrZB8TAosCodZAE1ZAKQJKeGrcFwzWKpTugH8H1mDsriHIrAZAXWPKio8wevIf6XHkvjmZBaqvSr3OITs9lJJPebvEqKdQiFM6490XV8GnGEdpRiisO2nQ28w62aB2aATDWRZBHYspP69x0ZBUYh2yrD1CmHWYiINZCJvGxQMEN0vGYZD';
+  async sendTemplateMessage(to: string, template: string, components: any[] = []) {
+    const ACCESS_TOKEN = 'EAAIZCPFZAYWO8BO4BpECSY6RUXnbLcTo3zBlgIy2XXSo5kFZAZCDw9kzcKnq3HxK7MwQfQpDzz4pcYP9Slq8ZC7DbOMjgAwXkZCZAiWe6OGLkTSj1zkN55tcZCILRc324rKwRfcWjhimyC90JA2fdyDj7ZCYxgqTEbcOsMABaFaT65ZBWzyjLyQUZACOXR3VJVvd2aQZCZClIEaNzIDN6OoroZAK3q2hedl2wZD';
     const PHONE_NUMBER_ID = '524888984044537';
 
-    const response = await lastValueFrom(
-      this.httpService.post(
-        `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
-        {
-          messaging_product: 'whatsapp',
-          to,
-          type: 'text',
-          text: { body: message },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${ACCESS_TOKEN}`,
-            'Content-Type': 'application/json',
+    try {
+      await lastValueFrom(
+        this.httpService.post(
+          `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+          {
+            messaging_product: 'whatsapp',
+            to,
+            type: 'template',
+            template: {
+              name: template,
+              language: { code: 'en' },
+              components: components.length ? [{ type: 'body', parameters: components }] : [],
+            },
           },
-        }
-      )
-    );
-    return response.data;
+          {
+            headers: {
+              Authorization: `Bearer ${ACCESS_TOKEN}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        )
+      );
+    } catch (err) {
+      console.error(`Failed to send template message "${template}" to ${to}:`, err);
+    }
+  }
+
+  async sendWhatsAppImageMessage(to: string, imagePath: string, parameters: any[]) {
+    const ACCESS_TOKEN = 'EAAIZCPFZAYWO8BO4BpECSY6RUXnbLcTo3zBlgIy2XXSo5kFZAZCDw9kzcKnq3HxK7MwQfQpDzz4pcYP9Slq8ZC7DbOMjgAwXkZCZAiWe6OGLkTSj1zkN55tcZCILRc324rKwRfcWjhimyC90JA2fdyDj7ZCYxgqTEbcOsMABaFaT65ZBWzyjLyQUZACOXR3VJVvd2aQZCZClIEaNzIDN6OoroZAK3q2hedl2wZD';
+    const PHONE_NUMBER_ID = '524888984044537';
+
+    try {
+      const uploadResponse = await lastValueFrom(
+        this.httpService.post(
+          `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/media`,
+          {
+            messaging_product: 'whatsapp',
+            file: imagePath,
+            type: 'image/png',
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${ACCESS_TOKEN}`,
+              'Content-Type': 'multipart/form-data',
+            },
+          }
+        )
+      );
+
+      const mediaId = uploadResponse.data.id;
+
+      await lastValueFrom(
+        this.httpService.post(
+          `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+          {
+            messaging_product: 'whatsapp',
+            to,
+            type: 'image',
+            image: {
+              id: mediaId,
+              caption: 'Your QR code for the ticket.',
+            },
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${ACCESS_TOKEN}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        )
+      );
+    } catch (err) {
+      console.error(`Failed to send image message to ${to}:`, err);
+    }
   }
 }
