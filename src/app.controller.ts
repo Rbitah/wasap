@@ -95,4 +95,14 @@ export class AppController {
 
     return { status: 'ok' };
   }
+  @Post('create-event')
+  async createEvent(@Body() body) {
+    const { name } = body;
+
+    if (!name) {
+      throw new HttpException('Invalid event name', HttpStatus.BAD_REQUEST);
+    }
+
+    return this.appService.createEvent(name);
+  }
 }

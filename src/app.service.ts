@@ -19,72 +19,99 @@ export class AppService {
   ) {}
 
   async handleMessage(from: string, messageText: string) {
-    console.log('Received message:', messageText);
+    console.log('Received message from:', from, 'Message:', messageText);
 
-    let user = await this.userRepository.findOne({ where: { phoneNumber: from } });
+    const user = await this.getUserByPhoneNumber(from);
 
     if (messageText.toLowerCase() === 'hi') {
-      if (!user) {
-        user = this.userRepository.create({ phoneNumber: from, step: 'ASK_USERNAME' });
-        await this.userRepository.save(user);
-        return 'greeting_message';
-      } else {
-        return {
-          template: 'event_list',
-          parameters: [{ type: 'text', text: await this.listEvents() }],
-        };
+      return await this.handleHiMessage(user, from);
+    }
+
+    if (user) {
+      switch (user.step) {
+        case 'ASK_USERNAME':
+          return await this.handleAskUsername(user, messageText);
+        case 'CHOOSE_EVENT':
+          return await this.handleChooseEvent(user, messageText);
+        case 'CHOOSE_PAYMENT':
+          return await this.handleChoosePayment(user, messageText, from);
+        default:
+          return 'error_message';
       }
+    } else {
+      return 'error_message';
     }
+  }
 
-    if (user?.step === 'ASK_USERNAME') {
-      user.username = messageText;
-      user.step = 'CHOOSE_EVENT';
-      await this.userRepository.save(user);
+  private async getUserByPhoneNumber(phoneNumber: string): Promise<User | undefined> {
+    return await this.userRepository.findOne({ where: { phoneNumber } });
+  }
 
+  private async handleHiMessage(user: User | undefined, from: string): Promise<any> {
+    if (!user) {
+      const newUser = this.userRepository.create({ phoneNumber: from, step: 'ASK_USERNAME' });
+      await this.userRepository.save(newUser);
+      return 'greeting_message';
+    } else {
+      const eventList = await this.listEvents();
       return {
-        template: 'thank_you_username',
-        parameters: [
-          { type: 'text', text: messageText },
-          { type: 'text', text: await this.listEvents() },
-        ],
+        template: 'event_list',
+        parameters: [{ type: 'text', text: eventList }],
       };
     }
+  }
 
-    if (user?.step === 'CHOOSE_EVENT') {
-      const eventId = parseInt(messageText);
-      const event = await this.eventRepository.findOne({ where: { id: eventId } });
+  private async handleAskUsername(user: User, username: string): Promise<any> {
+    user.username = username;
+    user.step = 'CHOOSE_EVENT';
+    await this.userRepository.save(user);
 
-      if (!event) return 'invalid_event';
+    const eventList = await this.listEvents();
+    return {
+      template: 'thank_you_username',
+      parameters: [
+        { type: 'text', text: username },
+        { type: 'text', text: eventList },
+      ],
+    };
+  }
 
-      user.eventId = event.id;
-      user.step = 'CHOOSE_PAYMENT';
-      await this.userRepository.save(user);
+  private async handleChooseEvent(user: User, messageText: string): Promise<any> {
+    const eventId = parseInt(messageText);
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
 
-      return 'choose_payment';
+    if (!event) {
+      return 'invalid_event';
     }
 
-    if (user?.step === 'CHOOSE_PAYMENT') {
-      if (messageText !== '1' && messageText !== '2') return 'invalid_payment_method';
+    user.eventId = event.id;
+    user.step = 'CHOOSE_PAYMENT';
+    await this.userRepository.save(user);
 
-      user.paymentMethod = messageText === '1' ? 'Airtel Money' : 'Mpamba';
-      user.step = 'PAYMENT';
-      const ticketId = uuidv4();
-      const qrCodeUrl = await this.generateQRCode(ticketId);
-      const eventName = (await this.eventRepository.findOne({ where: { id: user.eventId } })).name;
+    return 'choose_payment';
+  }
 
-      await this.userRepository.save(user);
-
-      return {
-        template: 'ticket_qr_code_images',
-        image: qrCodeUrl,
-        parameters: [
-          { type: 'text', text: user.username },
-          { type: 'text', text: eventName },
-        ],
-      };
+  private async handleChoosePayment(user: User, messageText: string, from: string): Promise<any> {
+    if (messageText !== '1' && messageText !== '2') {
+      return 'invalid_payment_method';
     }
 
-    return 'error_message';
+    user.paymentMethod = messageText === '1' ? 'Airtel Money' : 'Mpamba';
+    user.step = 'PAYMENT';
+    const ticketId = uuidv4();
+    const qrCodeUrl = await this.generateQRCode(ticketId);
+    const eventName = (await this.eventRepository.findOne({ where: { id: user.eventId } })).name;
+
+    await this.userRepository.save(user);
+
+    return {
+      template: 'ticket_qr_code_images',
+      image: qrCodeUrl,
+      parameters: [
+        { type: 'text', text: user.username },
+        { type: 'text', text: eventName },
+      ],
+    };
   }
 
   private async listEvents(): Promise<string> {
@@ -102,9 +129,6 @@ export class AppService {
       throw new Error('Failed to generate QR code.');
     }
   }
-
-  // Remaining methods (sendTemplateMessage, sendWhatsAppImageMessage) remain unchanged.
-
 
   async sendTemplateMessage(to: string, template: string, components: any[] = []) {
     const ACCESS_TOKEN = 'EAAIZCPFZAYWO8BOzjZALkLo4LpWgCBUslHdkFcDvMS0ruS5gVJ3le34tL8dpoHPZAxLLacSH4850tzsN2e2pali8u7Yho7uI5fce3saXZAhG7oazHff91WtZB4lbQeWUZBd3Qn8IVozFBqgsg6KOZCggKsjAtRzGUlclMZCiZBivUeKSU43pzaC2GWZC8Y8zE5kHpqOe8pgGWawbKcvFATfbXJZCMpKQZBfsZD';
@@ -184,5 +208,11 @@ export class AppService {
     } catch (err) {
       console.error(`Failed to send image message to ${to}:`, err);
     }
+  }
+
+  async createEvent(name: string) {
+    const event = this.eventRepository.create({ name });
+    await this.eventRepository.save(event);
+    return event;
   }
 }
