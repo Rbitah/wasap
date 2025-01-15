@@ -1,7 +1,9 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
+  Query,
   Headers,
   HttpException,
   HttpStatus,
@@ -12,9 +14,22 @@ import { AppService } from './app.service';
 export class AppController {
   constructor(private readonly appService: AppService) {}
 
+  // GET route for verification
+  @Get()
+  verifyToken(@Query('hub.mode') mode: string, @Query('hub.verify_token') token: string, @Query('hub.challenge') challenge: string) {
+    const validToken = 'tiyenitickets'; // Replace with your token
+
+    if (mode === 'subscribe' && token === validToken) {
+      return challenge;
+    } else {
+      throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
+    }
+  }
+
+  // POST route for handling webhook events
   @Post()
-  async handleWebhook(@Body() body: any, @Headers('X-Webhook-Token') token: string) {
-    if (!this.verifyToken(token)) {
+  async handleWebhook(@Body() body: any, @Headers('X-Hub-Signature') hubSignature: string) {
+    if (!this.isXHubSignatureValid(hubSignature, body)) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
@@ -45,8 +60,16 @@ export class AppController {
     return { status: 'ok' };
   }
 
-  private verifyToken(token: string): boolean {
-    const validToken = 'tiyenitickets';
-    return token === validToken;
+  // Helper function to validate X-Hub-Signature
+  private isXHubSignatureValid(hubSignature: string, body: any): boolean {
+    const secret = process.env.APP_SECRET || 'default_secret';
+    const crypto = require('crypto');
+    const hash = crypto
+      .createHmac('sha1', secret)
+      .update(JSON.stringify(body))
+      .digest('hex');
+    const expectedSignature = `sha1=${hash}`;
+
+    return hubSignature === expectedSignature;
   }
 }
