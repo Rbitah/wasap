@@ -25,8 +25,8 @@ export class AppController {
   }
 
   @Post()
-  async handleWebhook(@Body() body: any) {
-    console.log('Received webhook:', body);
+  async handleWebhook(@Body() body) {
+    console.log('Incoming request body:', JSON.stringify(body, null, 2));console.log('Received webhook:', body);
    
 
     if (!body || !body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
