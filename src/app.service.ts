@@ -92,7 +92,7 @@ export class AppService {
   }
 
   async sendTemplateMessage(to: string, template: string, components: any[] = []) {
-    const ACCESS_TOKEN = 'EAAIZCPFZAYWO8BO4BpECSY6RUXnbLcTo3zBlgIy2XXSo5kFZAZCDw9kzcKnq3HxK7MwQfQpDzz4pcYP9Slq8ZC7DbOMjgAwXkZCZAiWe6OGLkTSj1zkN55tcZCILRc324rKwRfcWjhimyC90JA2fdyDj7ZCYxgqTEbcOsMABaFaT65ZBWzyjLyQUZACOXR3VJVvd2aQZCZClIEaNzIDN6OoroZAK3q2hedl2wZD';
+    const ACCESS_TOKEN = 'EAAIZCPFZAYWO8BOzjZALkLo4LpWgCBUslHdkFcDvMS0ruS5gVJ3le34tL8dpoHPZAxLLacSH4850tzsN2e2pali8u7Yho7uI5fce3saXZAhG7oazHff91WtZB4lbQeWUZBd3Qn8IVozFBqgsg6KOZCggKsjAtRzGUlclMZCiZBivUeKSU43pzaC2GWZC8Y8zE5kHpqOe8pgGWawbKcvFATfbXJZCMpKQZBfsZD';
     const PHONE_NUMBER_ID = '524888984044537';
 
     try {
@@ -123,7 +123,7 @@ export class AppService {
   }
 
   async sendWhatsAppImageMessage(to: string, imagePath: string, parameters: any[]) {
-    const ACCESS_TOKEN = 'EAAIZCPFZAYWO8BO4BpECSY6RUXnbLcTo3zBlgIy2XXSo5kFZAZCDw9kzcKnq3HxK7MwQfQpDzz4pcYP9Slq8ZC7DbOMjgAwXkZCZAiWe6OGLkTSj1zkN55tcZCILRc324rKwRfcWjhimyC90JA2fdyDj7ZCYxgqTEbcOsMABaFaT65ZBWzyjLyQUZACOXR3VJVvd2aQZCZClIEaNzIDN6OoroZAK3q2hedl2wZD';
+    const ACCESS_TOKEN = 'EAAIZCPFZAYWO8BOzjZALkLo4LpWgCBUslHdkFcDvMS0ruS5gVJ3le34tL8dpoHPZAxLLacSH4850tzsN2e2pali8u7Yho7uI5fce3saXZAhG7oazHff91WtZB4lbQeWUZBd3Qn8IVozFBqgsg6KOZCggKsjAtRzGUlclMZCiZBivUeKSU43pzaC2GWZC8Y8zE5kHpqOe8pgGWawbKcvFATfbXJZCMpKQZBfsZD';
     const PHONE_NUMBER_ID = '524888984044537';
 
     try {
