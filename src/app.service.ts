@@ -172,7 +172,7 @@ export class AppService implements OnModuleInit {
 
   private async sendWhatsAppImageMessage(to: string, imagePath: string, eventName: string, username: string) {
     const accessToken = "EAAIZCPFZAYWO8BO4ivolk4AewAJGQVM0T0dIeILFzaevrXj8tvKIrkVLTyreG6u2yoMSpyUV4GKC33PaZCYcvzVev98KF8btZATW0uHdkZCCehG87V5uDi7DNxBJxPq2NVlxYSnU5ZC3R6y2X5quO7ZAJlly19cymdRdROFOFpZBotGoEl4RrUP4V2WGG5jL2zadqBofhSJaZAiIxZCSr7FbXq8nRbiX4ZD";
-    const phoneNumberId = 524888984044537;
+    const phoneNumberId = "524888984044537";
 
     try {
       const data = await fs.promises.readFile(imagePath);
