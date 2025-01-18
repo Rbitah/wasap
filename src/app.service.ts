@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { v4 as uuidv4 } from 'uuid';
 import * as QRCode from 'qrcode';
@@ -7,9 +7,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './user.entity';
 import { Event } from './event.entity';
+import * as fs from 'fs';
+import FormData from 'form-data';
 
 @Injectable()
-export class AppService {
+export class AppService implements OnModuleInit {
   constructor(
     private readonly httpService: HttpService,
     @InjectRepository(User)
@@ -18,73 +20,112 @@ export class AppService {
     private readonly eventRepository: Repository<Event>,
   ) {}
 
+  onModuleInit() {
+    this.ensureQRCodeDirectoryExists();
+  }
+
   async handleMessage(from: string, messageText: string) {
-    console.log('Received message:', messageText);
+    const user = await this.getUser(from);
 
-    let user = await this.userRepository.findOne({ where: { phoneNumber: from } });
-
-    if (messageText.toLowerCase() === 'hi') {
-      if (!user) {
-        user = this.userRepository.create({ phoneNumber: from, step: 'ASK_USERNAME' });
-        await this.userRepository.save(user);
-        return 'greeting_message';
-      } else {
-        return {
-          template: 'event_list',
-          parameters: [{ type: 'text', text: await this.listEvents() }],
-        };
+    if (!user) {
+      // New user: Start the conversation
+      if (messageText.toLowerCase() === 'hi') {
+        await this.greetNewUser(from);
       }
+      return;
     }
 
-    if (user?.step === 'ASK_USERNAME') {
-      user.username = messageText;
-      user.step = 'CHOOSE_EVENT';
-      await this.userRepository.save(user);
+    // Existing user: Handle based on their current step
+    switch (user.step) {
+      case 'ASK_USERNAME':
+        await this.setUsername(user, messageText);
+        break;
+      case 'CHOOSE_EVENT':
+        await this.handleEventSelection(user, messageText);
+        break;
+      case 'CHOOSE_PAYMENT':
+        await this.handlePaymentSelection(user, messageText);
+        break;
+      case 'PROVIDE_PHONE':
+        await this.handlePhoneNumber(user, messageText);
+        break;
+      default:
+        this.sendErrorMessage(from);
+    }
+  }
 
-      return {
-        template: 'thank_you_username',
-        parameters: [
-          { type: 'text', text: messageText },
-          { type: 'text', text: await this.listEvents() },
-        ],
-      };
+  private async getUser(from: string): Promise<User | null> {
+    return this.userRepository.findOne({ where: { phoneNumber: from } });
+  }
+
+  private async greetNewUser(from: string) {
+    const user = this.userRepository.create({ phoneNumber: from, step: 'ASK_USERNAME' });
+    await this.userRepository.save(user);
+    this.sendTemplateMessage(from, 'tiyeni_tickets', ['Welcome! Please enter your username.']);
+  }
+
+  private async setUsername(user: User, messageText: string) {
+    user.username = messageText;
+    user.step = 'CHOOSE_EVENT';
+    await this.userRepository.save(user);
+    const eventsList = await this.listEvents();
+    this.sendTemplateMessage(user.phoneNumber, 'tiyeni_tickets', [
+      `Hello ${user.username}! Here are the available events:\n${eventsList}\nPlease select an event by number.`,
+    ]);
+  }
+
+  private async handleEventSelection(user: User, messageText: string) {
+    const eventId = parseInt(messageText);
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+
+    if (!event) {
+      this.sendTemplateMessage(user.phoneNumber, 'tiyeni_tickets', ['Invalid event selection. Please try again.']);
+      return;
     }
 
-    if (user?.step === 'CHOOSE_EVENT') {
-      const eventId = parseInt(messageText);
-      const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    user.eventId = event.id;
+    user.step = 'CHOOSE_PAYMENT';
+    await this.userRepository.save(user);
+    this.sendTemplateMessage(user.phoneNumber, 'tiyeni_tickets', [
+      'Please choose your payment method:\n1. Airtel Money\n2. Mpamba',
+    ]);
+  }
 
-      if (!event) return 'invalid_event';
-
-      user.eventId = event.id;
-      user.step = 'CHOOSE_PAYMENT';
-      await this.userRepository.save(user);
-
-      return 'choose_payment';
+  private async handlePaymentSelection(user: User, messageText: string) {
+    if (messageText !== '1' && messageText !== '2') {
+      this.sendTemplateMessage(user.phoneNumber, 'tiyeni_tickets', ['Invalid payment method. Please choose 1 or 2.']);
+      return;
     }
 
-    if (user?.step === 'CHOOSE_PAYMENT') {
-      if (messageText !== '1' && messageText !== '2') return 'invalid_payment_method';
+    user.paymentMethod = messageText === '1' ? 'Airtel Money' : 'Mpamba';
+    user.step = 'PROVIDE_PHONE';
+    await this.userRepository.save(user);
+    this.sendTemplateMessage(user.phoneNumber, 'tiyeni_tickets', [
+      'Please provide your phone number for payment confirmation.',
+    ]);
+  }
 
-      user.paymentMethod = messageText === '1' ? 'Airtel Money' : 'Mpamba';
-      user.step = 'PAYMENT';
-      const ticketId = uuidv4();
-      const qrCodeUrl = await this.generateQRCode(ticketId);
-      const eventName = (await this.eventRepository.findOne({ where: { id: user.eventId } })).name;
-
-      await this.userRepository.save(user);
-
-      return {
-        template: 'ticket_qr_code_images',
-        image: qrCodeUrl,
-        parameters: [
-          { type: 'text', text: user.username },
-          { type: 'text', text: eventName },
-        ],
-      };
+  private async handlePhoneNumber(user: User, messageText: string) {
+    // Validate phone number (basic validation)
+    if (!messageText.match(/^\d{10}$/)) {
+      this.sendTemplateMessage(user.phoneNumber, 'tiyeni_tickets', ['Invalid phone number. Please try again.']);
+      return;
     }
 
-    return 'error_message';
+    user.phoneForPayment = messageText;
+    user.step = 'TICKET_GENERATION';
+    await this.userRepository.save(user);
+
+    // Generate ticket and QR code
+    const ticketId = uuidv4();
+    const qrCodeUrl = await this.generateQRCode(ticketId);
+    user.ticketId = ticketId;
+    await this.userRepository.save(user);
+
+    const eventName = (await this.eventRepository.findOne({ where: { id: user.eventId } })).name;
+
+    // Send ticket as an image with QR code
+    this.sendWhatsAppImageMessage(user.phoneNumber, qrCodeUrl, eventName, user.username);
   }
 
   private async listEvents(): Promise<string> {
@@ -93,27 +134,19 @@ export class AppService {
   }
 
   private async generateQRCode(ticketId: string): Promise<string> {
-    try {
-      const qrCodePath = `./qrcodes/${ticketId}.png`;
-      await QRCode.toFile(qrCodePath, ticketId);
-      return qrCodePath;
-    } catch (err) {
-      console.error('QR Code generation failed:', err);
-      throw new Error('Failed to generate QR code.');
-    }
+    const qrCodePath = `./qrcodes/${ticketId}.png`;
+    await QRCode.toFile(qrCodePath, ticketId);
+    return qrCodePath;
   }
 
-  // Remaining methods (sendTemplateMessage, sendWhatsAppImageMessage) remain unchanged.
-
-
-  async sendTemplateMessage(to: string, template: string, components: any[] = []) {
-    const ACCESS_TOKEN = 'EAAIZCPFZAYWO8BOzjZALkLo4LpWgCBUslHdkFcDvMS0ruS5gVJ3le34tL8dpoHPZAxLLacSH4850tzsN2e2pali8u7Yho7uI5fce3saXZAhG7oazHff91WtZB4lbQeWUZBd3Qn8IVozFBqgsg6KOZCggKsjAtRzGUlclMZCiZBivUeKSU43pzaC2GWZC8Y8zE5kHpqOe8pgGWawbKcvFATfbXJZCMpKQZBfsZD';
-    const PHONE_NUMBER_ID = '524888984044537';
+  public async sendTemplateMessage(to: string, template: string, parameters: string[]) {
+    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
     try {
       await lastValueFrom(
         this.httpService.post(
-          `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+          `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
           {
             messaging_product: 'whatsapp',
             to,
@@ -121,68 +154,78 @@ export class AppService {
             template: {
               name: template,
               language: { code: 'en' },
-              components: components.length ? [{ type: 'body', parameters: components }] : [],
+              components: [{ type: 'body', parameters: parameters.map((text) => ({ type: 'text', text })) }],
             },
           },
           {
             headers: {
-              Authorization: `Bearer ${ACCESS_TOKEN}`,
+              Authorization: `Bearer ${accessToken}`,
               'Content-Type': 'application/json',
             },
-          }
-        )
+          },
+        ),
       );
     } catch (err) {
       console.error(`Failed to send template message "${template}" to ${to}:`, err);
     }
   }
 
-  async sendWhatsAppImageMessage(to: string, imagePath: string, parameters: any[]) {
-    const ACCESS_TOKEN = 'EAAIZCPFZAYWO8BOzjZALkLo4LpWgCBUslHdkFcDvMS0ruS5gVJ3le34tL8dpoHPZAxLLacSH4850tzsN2e2pali8u7Yho7uI5fce3saXZAhG7oazHff91WtZB4lbQeWUZBd3Qn8IVozFBqgsg6KOZCggKsjAtRzGUlclMZCiZBivUeKSU43pzaC2GWZC8Y8zE5kHpqOe8pgGWawbKcvFATfbXJZCMpKQZBfsZD';
-    const PHONE_NUMBER_ID = '524888984044537';
+  private async sendWhatsAppImageMessage(to: string, imagePath: string, eventName: string, username: string) {
+    const accessToken = "EAAIZCPFZAYWO8BO4ivolk4AewAJGQVM0T0dIeILFzaevrXj8tvKIrkVLTyreG6u2yoMSpyUV4GKC33PaZCYcvzVev98KF8btZATW0uHdkZCCehG87V5uDi7DNxBJxPq2NVlxYSnU5ZC3R6y2X5quO7ZAJlly19cymdRdROFOFpZBotGoEl4RrUP4V2WGG5jL2zadqBofhSJaZAiIxZCSr7FbXq8nRbiX4ZD";
+    const phoneNumberId = 524888984044537;
 
     try {
+      const data = await fs.promises.readFile(imagePath);
+      const form = new FormData();
+      form.append('file', data, { filename: 'qr_code.png' });
+      form.append('messaging_product', 'whatsapp');
+      form.append('type', 'image/png');
+
       const uploadResponse = await lastValueFrom(
         this.httpService.post(
-          `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/media`,
-          {
-            messaging_product: 'whatsapp',
-            file: imagePath,
-            type: 'image/png',
-          },
+          `https://graph.facebook.com/v21.0/${phoneNumberId}/media`,
+          form,
           {
             headers: {
-              Authorization: `Bearer ${ACCESS_TOKEN}`,
-              'Content-Type': 'multipart/form-data',
+              Authorization: `Bearer ${accessToken}`,
+              ...form.getHeaders(),
             },
-          }
-        )
+          },
+        ),
       );
 
       const mediaId = uploadResponse.data.id;
 
       await lastValueFrom(
         this.httpService.post(
-          `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+          `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
           {
             messaging_product: 'whatsapp',
             to,
             type: 'image',
-            image: {
-              id: mediaId,
-              caption: 'Your QR code for the ticket.',
-            },
+            image: { id: mediaId },
+            caption: `Your ticket for ${eventName}, ${username}.`,
           },
           {
             headers: {
-              Authorization: `Bearer ${ACCESS_TOKEN}`,
+              Authorization: `Bearer ${accessToken}`,
               'Content-Type': 'application/json',
             },
-          }
-        )
+          },
+        ),
       );
     } catch (err) {
       console.error(`Failed to send image message to ${to}:`, err);
+    }
+  }
+
+  private sendErrorMessage(to: string) {
+    this.sendTemplateMessage(to, 'tiyeni_tickets', ['An error occurred. Please try again later.']);
+  }
+
+  private ensureQRCodeDirectoryExists() {
+    if (!fs.existsSync('./qrcodes')) {
+      fs.mkdirSync('./qrcodes');
     }
   }
   async createEvent(name: string) {

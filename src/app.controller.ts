@@ -2,11 +2,10 @@ import {
   Controller,
   Post,
   Body,
-  Headers,
-  HttpException,
-  HttpStatus,
   Get,
   Query,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { AppService } from './app.service';
 
@@ -30,7 +29,7 @@ export class AppController {
   }
 
   @Post()
-  async handleWebhook(@Body() body) {
+  async handleWebhook(@Body() body: any) {
     console.log('Incoming request body:', JSON.stringify(body, null, 2));
 
     if (!body || body.object !== 'whatsapp_business_account') {
@@ -68,33 +67,19 @@ export class AppController {
         }
 
         try {
-          const response = await this.appService.handleMessage(from, messageText);
-
-          if (typeof response === 'string') {
-            await this.appService.sendTemplateMessage(from, response);
-          } else if (response.template) {
-            if (response.image) {
-              await this.appService.sendWhatsAppImageMessage(
-                from,
-                response.image,
-                response.parameters
-              );
-            } else {
-              await this.appService.sendTemplateMessage(
-                from,
-                response.template,
-                response.parameters
-              );
-            }
-          }
+          await this.appService.handleMessage(from, messageText);
         } catch (error) {
           console.error('Error processing message:', error);
+          await this.appService.sendTemplateMessage(from, 'tiyeni_tickets', [
+            'An error occurred. Please try again later.',
+          ]);
         }
       }
     }
 
     return { status: 'ok' };
   }
+
   @Post('create-event')
   async createEvent(@Body() body) {
     const { name } = body;

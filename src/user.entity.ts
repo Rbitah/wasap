@@ -8,11 +8,17 @@ export class User {
   @Column()
   phoneNumber: string;
 
+  @Column()
+  phoneForPayment: string;
+
   @Column({ nullable: true })
   username: string;
 
   @Column()
   step: string;
+
+  @Column("uuid", { nullable: true })
+  ticketId: string;
 
   @Column({ nullable: true })
   eventId: number;
